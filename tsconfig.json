@@ -7,6 +7,7 @@
       "DOM.Iterable",
       "ES2020"
     ],
+    "types": [],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -22,6 +23,9 @@
   },
   "include": [
     "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
   ],
   "references": []
 }
