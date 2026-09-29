@@ -1,160 +1,125 @@
+import { useMemo, useState } from "react";
 import "./styles.css";
+import { useLedger } from "./useLedger";
+import { audit, isFindPending, squaresList } from "./domain";
+import { ToastBar, fmtTime, useToast } from "./ui/common";
+import { StrataTab } from "./ui/StrataTab";
+import { FeaturesTab } from "./ui/FeaturesTab";
+import { FindsTab } from "./ui/FindsTab";
+import { AuditTab } from "./ui/AuditTab";
+import { ExportTab } from "./ui/ExportTab";
 
-const project = {
-  "id": "hxwl-10",
-  "port": 5110,
-  "title": "考古探方记录",
-  "subtitle": "遗址探方、地层关系与出土物坐标档案",
-  "stack": "React + Vite + TypeScript + CSS",
-  "theme": [
-    "#854d0e",
-    "#047857",
-    "#475569"
-  ],
-  "domain": "考古发掘",
-  "users": [
-    "发掘队员",
-    "领队",
-    "资料整理员"
-  ],
-  "metrics": [
-    "探方数",
-    "地层数",
-    "出土物",
-    "未整理记录"
-  ],
-  "filters": [
-    "灰坑",
-    "墓葬",
-    "房址",
-    "沟状遗迹"
-  ],
-  "fields": [
-    "遗址",
-    "探方",
-    "地层",
-    "遗迹单位",
-    "深度",
-    "土色",
-    "坐标点",
-    "出土物"
-  ],
-  "records": [
-    [
-      "T0203",
-      "第3层",
-      "灰褐土",
-      "陶片12件，坐标E3N4"
-    ],
-    [
-      "T0204",
-      "H12灰坑",
-      "黑褐土",
-      "夹炭屑，见动物骨"
-    ],
-    [
-      "T0301",
-      "F2房址",
-      "夯土面",
-      "柱洞关系需复核"
-    ]
-  ]
-};
+type TabId = "strata" | "features" | "finds" | "audit" | "export";
 
-const statusColors = ["status-ok", "status-watch", "status-danger"];
-
-function MetricCard({ label, value, index }: { label: string; value: string; index: number }) {
-  return (
-    <article className="metric-card">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <i className={statusColors[index % statusColors.length]} />
-    </article>
-  );
-}
+const TABS: { id: TabId; label: string }[] = [
+  { id: "strata", label: "地层" },
+  { id: "features", label: "遗迹单位" },
+  { id: "finds", label: "出土物 / 待归区" },
+  { id: "audit", label: "异常核查" },
+  { id: "export", label: "台账 / 存档" },
+];
 
 function App() {
-  const values = project.metrics.map((metric: string, index: number) => {
-    const base = [84, 12, 31, 7][index % 4];
-    return String(base + index * 3);
-  });
+  const api = useLedger();
+  const { state, savedAt, dirty } = api;
+  const { toast, show } = useToast();
+  const [tab, setTab] = useState<TabId>("strata");
+  const [auditSquare, setAuditSquare] = useState("");
+
+  const metrics = useMemo(() => {
+    const anomalies = audit(state);
+    return {
+      squares: squaresList(state).length,
+      strata: state.strata.length,
+      features: state.features.length,
+      pending: state.finds.filter((f) => isFindPending(state, f)).length,
+      errors: anomalies.filter((a) => a.level === "error").length,
+    };
+  }, [state]);
+
+  const notify = (ok: boolean, text: string) => show(ok ? "ok" : "err", text);
+
+  const goAudit = (sq?: string) => {
+    setAuditSquare(sq ?? "");
+    setTab("audit");
+  };
 
   return (
     <main className="app-shell">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">{project.id} · port {project.port}</p>
-          <h1>{project.title}</h1>
-          <p className="subtitle">{project.subtitle}</p>
+      <header className="topbar">
+        <div className="brand">
+          <p className="eyebrow">续编发掘簿</p>
+          <h1>考古探方续编记录</h1>
+          <p className="subtitle">探方地层 · 遗迹单位 · 出土物坐标档案 —— 换页不丢，重开续整</p>
         </div>
-        <div className="stack-card">
-          <span>技术栈</span>
-          <strong>{project.stack}</strong>
+        <div className={`save-status ${dirty ? "is-dirty" : ""}`}>
+          <span className="save-dot" />
+          {dirty ? "改动自动保存中…" : `已保存 · ${fmtTime(savedAt)}`}
         </div>
-      </section>
+      </header>
 
       <section className="metrics-grid">
-        {project.metrics.map((metric: string, index: number) => (
-          <MetricCard key={metric} label={metric} value={values[index]} index={index} />
+        <MetricCard label="探方" value={metrics.squares} />
+        <MetricCard label="地层记录" value={metrics.strata} />
+        <MetricCard label="遗迹单位" value={metrics.features} />
+        <MetricCard label="待归区出土物" value={metrics.pending} warn={metrics.pending > 0} />
+        <button className="metric-card metric-button" onClick={() => goAudit()}>
+          <span>地层/层序异常</span>
+          <strong className={metrics.errors > 0 ? "num-err" : ""}>{metrics.errors}</strong>
+          <i className="metric-go">去核查 →</i>
+        </button>
+      </section>
+
+      <nav className="tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`tab ${tab === t.id ? "active" : ""}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+            {t.id === "finds" && metrics.pending > 0 && (
+              <span className="tab-badge">{metrics.pending}</span>
+            )}
+            {t.id === "audit" && metrics.errors > 0 && (
+              <span className="tab-badge badge-err">{metrics.errors}</span>
+            )}
+          </button>
         ))}
-      </section>
+      </nav>
 
-      <section className="workspace">
-        <aside className="panel narrow">
-          <h2>角色</h2>
-          <div className="chips">
-            {project.users.map((user: string) => (
-              <span key={user}>{user}</span>
-            ))}
-          </div>
-          <h2>筛选</h2>
-          <div className="chips muted">
-            {project.filters.map((filter: string) => (
-              <button key={filter}>{filter}</button>
-            ))}
-          </div>
-        </aside>
+      {tab === "strata" && (
+        <StrataTab
+          api={api}
+          state={state}
+          notify={notify}
+          jumpToAudit={(sq) => goAudit(sq)}
+        />
+      )}
+      {tab === "features" && <FeaturesTab api={api} state={state} notify={notify} />}
+      {tab === "finds" && <FindsTab api={api} state={state} notify={notify} />}
+      {tab === "audit" && <AuditTab key={auditSquare} state={state} initialSquare={auditSquare} />}
+      {tab === "export" && <ExportTab api={api} state={state} notify={notify} />}
 
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <p>{project.domain}</p>
-              <h2>记录字段</h2>
-            </div>
-            <button className="primary-action">新增记录</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
-
-      <section className="records panel">
-        <div className="section-heading">
-          <div>
-            <p>示例数据</p>
-            <h2>近期记录</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="record-list">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")} className="record-card">
-              <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      <ToastBar toast={toast} />
+      <datalist id="square-list">
+        {squaresList(state).map((sq) => (
+          <option key={sq} value={sq} />
+        ))}
+      </datalist>
+      <footer className="foot">
+        数据保存在本机浏览器（localStorage），录入自动落盘；可导出 CSV 台账与 JSON 存档留档、换机续整。
+      </footer>
     </main>
+  );
+}
+
+function MetricCard({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
+  return (
+    <article className="metric-card">
+      <span>{label}</span>
+      <strong className={warn ? "num-warn" : ""}>{value}</strong>
+    </article>
   );
 }
 
